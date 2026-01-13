@@ -5,8 +5,7 @@ import click
 
 from ftmg.backend import delete_all, get_driver
 from ftmg.config import Configuration
-from ftmg.read import read_entities
-from ftmg.transform import create_entities
+from ftmg.transform import load_entities
 
 
 @click.group()
@@ -53,23 +52,22 @@ def trash_command(config: Path) -> None:
 )
 @click.option(
     "-d",
-    "--data",
+    "--source",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     required=True,
     help="Path to the entities data file",
 )
-def load_command(config: Path, data: Path) -> None:
+def load_command(config: Path, source: Path) -> None:
     """Load FollowTheMoney entities into the graph database.
 
     Args:
         config: Path to the YAML configuration file
-        data: Path to the entities data file (JSON lines format)
+        source: Path to the entities data file (JSON lines format)
     """
     configuration = Configuration.from_yaml(config)
     driver = get_driver(configuration)
     try:
-        entities = read_entities(data)
-        create_entities(driver, entities)
+        load_entities(configuration, driver, source)
     finally:
         driver.close()
 

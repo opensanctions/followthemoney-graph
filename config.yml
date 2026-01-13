@@ -2,3 +2,25 @@ db:
   url: bolt://localhost:7687
   username: neo4j
   password: banana123
+
+nodes:
+  topics:
+    labels:
+      "gov.soe": "SOE"
+      "gov.igo": "IGO"
+      "gov.head": "HeadOfState"
+      "gov.executive": "Executive"
+      "gov.legislative": "Legislative"
+      "gov.judicial": "Judicial"
+      "gov.financial": "CentralBanking"
+      "role.rca": "CloseAssociate"
+      "role.pep": "Politician"
+      "poi": "PersonOfInterest"
+      "sanction": "Sanctioned"
+      "sanction.linked": "SanctionLinked"
+      "sanction.counter": "CounterSanctioned"
+      "export.control": "ExportControlled"
+      "export.risk": "TradeRisk"
+    ignore:
+      - Position
+      - Occupancy
