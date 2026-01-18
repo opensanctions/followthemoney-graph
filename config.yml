@@ -4,6 +4,26 @@ db:
   password: banana123
 
 nodes:
+  schemata:
+    Position:
+      ignore: true
+    Address:
+      ignore: true
+    Person:
+      label: "Human"
+
+  types:
+    address:
+      reify: true
+    identifiers:
+      reify: true
+    phone:
+      reify: true
+    email:
+      reify: true
+    url:
+      reify: true
+
   topics:
     labels:
       "gov.soe": "SOE"
@@ -22,5 +42,11 @@ nodes:
       "export.control": "ExportControlled"
       "export.risk": "TradeRisk"
     ignore:
-      - Position
-      - Occupancy
+      - "gov.national"
+      - "gov.state"
+      - "gov.muni"
+
+edges:
+  schemata:
+    Occupancy:
+      ignore: true

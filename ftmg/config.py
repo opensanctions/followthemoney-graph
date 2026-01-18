@@ -1,9 +1,9 @@
-from functools import cached_property
 from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field
+from followthemoney import model
+from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -47,15 +47,6 @@ class NodesConfig(BaseModel):
     types: dict[str, TypeReificationConfig] = Field(default_factory=dict)
     topics: TopicsConfig = Field(default_factory=TopicsConfig)
 
-    @cached_property
-    def ignored_schemata(self) -> set[str]:
-        """Get the set of schemata names that are configured to be ignored.
-
-        Returns:
-            Set of schema names to ignore
-        """
-        return {name for name, cfg in self.schemata.items() if cfg.ignore}
-
 
 class SchemaEdgeConfig(BaseModel):
     """Configuration for a specific edge schema."""
@@ -68,6 +59,7 @@ class SchemaEdgeConfig(BaseModel):
 class PropertyEdgeConfig(BaseModel):
     """Configuration for property-based edge creation."""
 
+    ignore: bool = False
     label: str
 
 
@@ -77,13 +69,30 @@ class EdgesConfig(BaseModel):
     schemata: dict[str, SchemaEdgeConfig] = Field(default_factory=dict)
     properties: dict[str, PropertyEdgeConfig] = Field(default_factory=dict)
 
+    @model_validator(mode="before")
+    @classmethod
+    def ensure_dicts(cls, config: dict[str, Any]) -> dict[str, Any]:
+        """Ensure that schemata and properties are dictionaries."""
+        schemata = config.get("schemata", {})
+        if not isinstance(schemata, dict):
+            raise ValueError("Edges 'schemata' must be a dictionary.")
+        edge_schemata = [s for s in model.schemata.values() if s.edge]
+        properties = config.get("properties", {})
+        if not isinstance(properties, dict):
+            raise ValueError("Edges 'properties' must be a dictionary.")
+        return config
+
 
 class Configuration(BaseModel):
     """Transformer configuration settings."""
 
+    path: Path
     db: DatabaseConfig
     nodes: NodesConfig = Field(default_factory=NodesConfig)
     edges: EdgesConfig = Field(default_factory=EdgesConfig)
+
+    def __hash__(self) -> int:
+        return hash(self.path)
 
     @classmethod
     def from_yaml(cls, path: Path) -> "Configuration":
@@ -103,4 +112,5 @@ class Configuration(BaseModel):
         with path.open("r", encoding="utf-8") as f:
             data: dict[str, Any] = yaml.safe_load(f)
 
+        data["path"] = path  # Set the path attribute
         return cls.model_validate(data)

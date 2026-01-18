@@ -1,6 +1,8 @@
+from functools import cache
 import logging
 from pathlib import Path
 
+from followthemoney import Property, Schema
 import stringcase
 from followthemoney.entity import ValueEntity
 from followthemoney.types import registry
@@ -53,6 +55,7 @@ def should_reify_value(prop_type, value: str) -> bool:
     return True
 
 
+@cache
 def get_topic_label(config: Configuration, topic: str) -> str:
     """Convert a topic code to a graph label.
 
@@ -71,6 +74,30 @@ def get_topic_label(config: Configuration, topic: str) -> str:
     return label
 
 
+@cache
+def get_schema_labels(config: Configuration, schema: Schema) -> list[str]:
+    """Get the labels for a given schema name.
+
+    Args:
+        config: Configuration for transformation
+        schema: FollowTheMoney schema
+    Returns:
+        Set of labels
+    """
+    labels = set()
+    labels.add(ENTITY_LABEL)
+    if not schema.abstract:
+        schema_config = config.nodes.schemata.get(schema.name)
+        schema_label = schema.name
+        if schema_config and schema_config.label:
+            schema_label = schema_config.label
+        labels.add(schema_label)
+
+    for parent in schema.extends:
+        labels.update(get_schema_labels(config, parent))
+    return sorted(labels)
+
+
 def create_node_entity(
     config: Configuration,
     session: Session,
@@ -87,10 +114,6 @@ def create_node_entity(
     schema_config = config.nodes.schemata.get(proxy.schema.name)
     if schema_config and schema_config.ignore:
         # log.debug("Ignoring entity %s (schema: %s)", proxy.id, proxy.schema.name)
-        return
-
-    # Skip specific schemata (from contrib/export.py)
-    if proxy.schema.name in config.nodes.ignored_schemata:
         return
 
     # Build properties dict
@@ -121,14 +144,8 @@ def create_node_entity(
             # Store as array for multi-valued properties
             properties[prop.name] = list(values)
 
-    # Determine labels
-    labels = []
-    schemata = [s for s in proxy.schema.schemata if not s.abstract]
-    labels.extend([s.name for s in schemata])
-    labels.append(ENTITY_LABEL)
-
     # Create the node with all labels and properties
-    labels_str = ":".join(labels)
+    labels_str = ":".join(get_schema_labels(config, proxy.schema))
     session.run(
         f"CREATE (n:{labels_str}) SET n = $props",
         props=properties,
@@ -143,7 +160,7 @@ def create_reified_values(
     """Create reified value nodes and edges for an entity's properties.
 
     Args:
-        _config: Configuration for transformation (unused, reserved for future use)
+        config: Configuration for transformation (unused, reserved for future use)
         session: Neo4j session
         proxy: Entity proxy
     """
@@ -189,6 +206,23 @@ def create_reified_values(
             )
 
 
+@cache
+def get_prop_edge_label(config: Configuration, prop: Property) -> str:
+    """Get the edge label for a property-based edge.
+
+    Args:
+        config: Configuration for transformation
+        prop_qname: Qualified name of the property
+    Returns:
+        Edge label
+    """
+    prop_config = config.edges.properties.get(prop.qname)
+    if prop_config and prop_config.label:
+        return prop_config.label
+    # Default edge label
+    return stringcase.constcase(prop.label)
+
+
 def create_entity_links(
     config: Configuration,
     session: Session,
@@ -197,7 +231,7 @@ def create_entity_links(
     """Create edges for entity-reference properties.
 
     Args:
-        _config: Configuration for transformation (unused, reserved for future use)
+        config: Configuration for transformation (unused, reserved for future use)
         session: Neo4j session
         proxy: Entity proxy
     """
@@ -208,22 +242,24 @@ def create_entity_links(
         if prop.type != registry.entity:
             continue
 
-        values = proxy.get(prop)
-        for value in values:
+        prop_config = config.edges.properties.get(prop.qname)
+        if prop_config and prop_config.ignore:
+            continue
+
+        edge_label = get_prop_edge_label(config, prop)
+
+        for value in proxy.get(prop):
             target_id = prop.type.node_id(value)
             if target_id is None:
                 continue
-            edge_label = stringcase.constcase(prop.name)
             session.run(
                 f"""
                 MATCH (s:Entity {{id: $source_id}})
                 MATCH (t:Entity {{id: $target_id}})
                 CREATE (s)-[r:{edge_label}]->(t)
-                SET r.datasets = $datasets
                 """,
                 source_id=entity_id,
                 target_id=target_id,
-                datasets=list(proxy.datasets),
             )
 
 
@@ -242,8 +278,7 @@ def create_topic_labels(
     entity_id = registry.entity.node_id_safe(proxy.id)
     if entity_id is None:
         return
-    topics = proxy.get_type_values(registry.topic)
-    for topic in topics:
+    for topic in proxy.get_type_values(registry.topic):
         # Check if topic should be ignored
         if topic in config.nodes.topics.ignore:
             continue
@@ -373,11 +408,12 @@ def load_entities(
     with driver.session() as session:
         for entity in read_entities(source_path):
             # Process entity links from node entities
+            if entity.schema.edge:
+                create_edge_entity(config, session, entity)
+                edge_count += 1
+
             if not entity.schema.edge:
                 create_entity_links(config, session, entity)
-                edge_count += 1
-            else:
-                create_edge_entity(config, session, entity)
                 edge_count += 1
 
             if edge_count > 0 and edge_count % 1000 == 0:
