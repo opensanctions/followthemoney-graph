@@ -15,24 +15,6 @@ log = logging.getLogger(__name__)
 ENTITY_LABEL = "Entity"
 
 
-# Property types to inline on nodes
-TYPES_INLINE = (
-    registry.name,
-    registry.date,
-    registry.identifier,
-    registry.country,
-)
-
-# Property types to reify into separate nodes
-TYPES_REIFY = (
-    registry.name,
-    registry.url,
-    registry.identifier,
-    registry.email,
-    registry.phone,
-)
-
-
 def should_reify_value(prop_type, value: str) -> bool:
     """Check if a property value should be reified into a separate node.
 
