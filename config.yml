@@ -2,13 +2,16 @@ db:
   url: bolt://localhost:7687
   username: neo4j
   password: banana123
-  batch: 10000
 
 nodes:
   schemata:
     Position:
       ignore: true
     Address:
+      ignore: true
+    Sanction:
+      ignore: true
+    Security:
       ignore: true
     Person:
       label: "Human"

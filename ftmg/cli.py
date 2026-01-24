@@ -5,7 +5,7 @@ from typing import TextIO
 import yaml
 import click
 
-from ftmg.backend import create_indexes, delete_all, get_driver
+from ftmg.backend import create_indexes, delete_all, get_driver, prune_reified_nodes
 from ftmg.config import Configuration
 from ftmg.transform import load_entities
 
@@ -90,6 +90,31 @@ def load_command(config: Path, source: Path) -> None:
     create_indexes(configuration, driver)
     try:
         load_entities(configuration, driver, source)
+    finally:
+        driver.close()
+
+
+@cli.command("prune")
+@click.argument(
+    "config",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    required=True,
+)
+def prune_command(config: Path) -> None:
+    """Remove reified value nodes with fewer than 2 inbound edges.
+
+    This command cleans up reified nodes (e.g., name, address, email) that are
+    only referenced by a single entity. Reified nodes are most useful when they
+    represent shared values between multiple entities, so single-reference nodes
+    don't provide additional value in the graph structure.
+
+    Args:
+        config: Path to the YAML configuration file
+    """
+    configuration = Configuration.from_yaml(config)
+    driver = get_driver(configuration)
+    try:
+        prune_reified_nodes(configuration, driver)
     finally:
         driver.close()
 

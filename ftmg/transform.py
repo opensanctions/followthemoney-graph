@@ -101,12 +101,12 @@ def generate_node_entity(
         if len(values):
             properties[prop.name] = values
 
-    # Create node with just Entity label
+    # Create node with all labels, using MERGE to make it idempotent
     labels = get_schema_labels(config, proxy.schema)
     label = ":".join(labels)
     create_query = f"""
     UNWIND $batch AS props
-    CREATE (n:{label})
+    MERGE (n:{label} {{id: props.id}})
     SET n = props
     """
     yield QueryBatch(query=create_query, params=properties)
@@ -191,7 +191,7 @@ def generate_entity_links(
     if entity_id is None:
         return
 
-    sconfig = config.edges.schemata.get(proxy.schema.name)
+    sconfig = config.nodes.schemata.get(proxy.schema.name)
     if sconfig is None or sconfig.ignore:
         return
 
@@ -216,8 +216,8 @@ def generate_entity_links(
             UNWIND $batch AS item
             MATCH (s:{sconfig.label} {{id: item.source_id}})
             MATCH (t:{srconfig.label} {{id: item.target_id}})
-            CREATE (s)-[r:{pconfig.label}]->(t)
-            SET r = item.props
+            MERGE (s)-[r:{pconfig.label}]->(t)
+            ON CREATE SET r = item.props
             """
             yield QueryBatch(
                 query=query,
@@ -246,7 +246,7 @@ def generate_topic_labels(
     if entity_id is None:
         return
 
-    sconfig = config.edges.schemata.get(proxy.schema.name)
+    sconfig = config.nodes.schemata.get(proxy.schema.name)
     if sconfig is None or sconfig.ignore:
         return
 
@@ -317,10 +317,15 @@ def generate_edge_entity(
             props[prop.name] = values
 
     # Generate edges for all source/target combinations
+    # Check for existing relationship by id property to ensure idempotency
     query = f"""
     UNWIND $batch AS item
     MATCH (s:{ssconfig.label} {{id: item.source_id}})
     MATCH (t:{tsconfig.label} {{id: item.target_id}})
+    OPTIONAL MATCH (s)-[existing:{sconfig.label}]->(t)
+    WHERE existing.id = item.props.id
+    WITH s, t, item, existing
+    WHERE existing IS NULL
     CREATE (s)-[r:{sconfig.label}]->(t)
     SET r = item.props
     """
@@ -356,7 +361,7 @@ class QueryBatcher:
             self.flush_query(batch.query)
         buffer_total = sum(len(v) for v in self.queries.values())
         if buffer_total % 10_000 == 0:
-            log.info("Buffered %d queries...", buffer_total)
+            log.info("Buffer has %d queries...", buffer_total)
 
     def consume(self, batches: Generator[QueryBatch, None, None]) -> None:
         for batch in batches:
