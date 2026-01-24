@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+import stringcase
 from followthemoney import model, registry
 from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -21,23 +22,24 @@ class DatabaseConfig(BaseSettings):
 class TypeReificationConfig(BaseModel):
     """Configuration for property type reification."""
 
-    reify: bool = True
-    label: str | None = None
+    reify: bool = False
+    label: str
+    edge_label: str
 
 
 class SchemaNodeConfig(BaseModel):
     """Configuration for a specific entity schema's node representation."""
 
     ignore: bool = False
-    label: str | None = None
-    properties: list[str] | None = None
+    label: str
+    properties: list[str]
 
 
-class TopicsConfig(BaseModel):
-    """Configuration for topic-to-label mapping."""
+class TopicLabelsConfig(BaseModel):
+    """Configuration for topic to label mapping."""
 
-    labels: dict[str, str] = Field(default_factory=dict)
-    ignore: list[str] = Field(default_factory=list)
+    label: str
+    ignore: bool = False
 
 
 class NodesConfig(BaseModel):
@@ -45,25 +47,56 @@ class NodesConfig(BaseModel):
 
     schemata: dict[str, SchemaNodeConfig] = Field(default_factory=dict)
     types: dict[str, TypeReificationConfig] = Field(default_factory=dict)
-    topics: TopicsConfig = Field(default_factory=TopicsConfig)
+    topics: dict[str, TopicLabelsConfig] = Field(default_factory=dict)
 
     @model_validator(mode="before")
     @classmethod
     def complete_model(cls, config: dict[str, Any]) -> dict[str, Any]:
-        """Fill in any missing schemata from the model."""
-        schemata = config.get("schemata", {})
-        if not isinstance(schemata, dict):
-            raise ValueError("Nodes 'schemata' must be a dictionary.")
         # Fill in any missing node schemata from the model:
+        schemata = config.get("schemata", {})
         for schema in model.schemata.values():
-            if not schema.edge and schema.name not in schemata:
-                schemata[schema.name] = {}
+            if schema.name not in schemata:
+                if not schema.edge and not schema.abstract:
+                    schemata[schema.name] = {}
         for name, sconfig in schemata.items():
             schema = model.get(name)
-            if schema is None or schema.edge:
+            if schema is None or schema.edge or schema.abstract:
                 raise ValueError(f"Node schemata refers to invalid schema: {name}")
-            sconfig["label"] = sconfig.get("label") or schema.name
+            sconfig["label"] = sconfig.get("label", schema.name)
             sconfig["properties"] = sconfig.get("properties", schema.featured)
+        config["schemata"] = schemata
+
+        # Fill in any missing type reification configs from the model:
+        types = config.get("types", {})
+        for type_ in registry.types:
+            if type_.matchable and type_.name not in types:
+                types[type_.name] = {"reify": False}
+        for name, tconfig in types.items():
+            try:
+                type_ = registry.get(name)
+            except AttributeError:
+                raise ValueError(f"Types config refers to invalid type: {name}")
+            if not type_.matchable:
+                raise ValueError(f"Type is not matchable: {name}")
+            tconfig["label"] = tconfig.get("label", type_.name)
+            edge_label = f"HAS_{stringcase.constcase(type_.name)}"
+            tconfig["edge_label"] = tconfig.get("edge_label", edge_label)
+
+        config["types"] = types
+
+        # Fill in any missing topic labels from the model:
+        topics = config.get("topics", {})
+        for topic in registry.topic.codes:
+            if topic not in topics:
+                topics[topic] = {}
+        for name, tconfig in topics.items():
+            if name not in registry.topic.codes:
+                raise ValueError(f"Config refers to invalid topic: {name}")
+            label = name.replace(".", "_").capitalize()
+            label = stringcase.pascalcase(label)
+            tconfig["label"] = tconfig.get("label", label)
+            tconfig["ignore"] = tconfig.get("ignore", False)
+        config["topics"] = topics
 
         return config
 
@@ -93,10 +126,10 @@ class EdgesConfig(BaseModel):
     @classmethod
     def complete_model(cls, config: dict[str, Any]) -> dict[str, Any]:
         """Ensure that schemata and properties are dictionaries."""
+        # Fill in any missing edge schemata from the model
         schemata = config.get("schemata", {})
         if not isinstance(schemata, dict):
             raise ValueError("Edges 'schemata' must be a dictionary.")
-        # Fill in any missing edge schemata from the model
         for schema in model.schemata.values():
             if schema.edge and schema.name not in schemata:
                 schemata[schema.name] = {}
@@ -104,17 +137,25 @@ class EdgesConfig(BaseModel):
             schema = model.get(name)
             if schema is None or not schema.edge:
                 raise ValueError(f"Edge schemata refers to invalid edge schema: {name}")
-            sconfig["label"] = sconfig.get("label") or schema.name
+            label = stringcase.constcase(schema.edge_label)
+            sconfig["label"] = sconfig.get("label", label)
             sconfig["properties"] = sconfig.get("properties", schema.featured)
+        config["schemata"] = schemata
 
+        # Entity properties that are meant to be turned into edges:
         properties = config.get("properties", {})
         if not isinstance(properties, dict):
             raise ValueError("Edges 'properties' must be a dictionary.")
+        for prop in model.properties:
+            if prop.type == registry.entity and prop.qname not in properties:
+                properties[prop.qname] = {}
         for name, pconfig in properties.items():
             prop = model.get_qname(name)
             if prop is None or prop.type != registry.entity:
                 raise ValueError(f"Edge properties refers to invalid property: {name}")
-            # pconfig["label"] = pconfig.get("label") or prop.name
+            pconfig["label"] = pconfig.get("label", stringcase.constcase(prop.name))
+            pconfig["ignore"] = pconfig.get("ignore", prop.hidden)
+        config["properties"] = properties
         return config
 
 

@@ -15,7 +15,7 @@ nodes:
   types:
     address:
       reify: true
-    identifiers:
+    identifier:
       reify: true
     phone:
       reify: true

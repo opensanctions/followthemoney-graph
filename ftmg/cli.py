@@ -1,6 +1,8 @@
 import logging
 from pathlib import Path
+from typing import TextIO
 
+import yaml
 import click
 
 from ftmg.backend import delete_all, get_driver
@@ -16,6 +18,23 @@ def cli() -> None:
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+
+
+@cli.command("check-config")
+@click.argument(
+    "config",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    required=True,
+)
+@click.option("-o", "--output", type=click.File("w"), default="-")
+def check_config_command(config: Path, output: TextIO) -> None:
+    """Validate and expand the YAML configuration file.
+
+    Args:
+        config: Path to the YAML configuration file
+    """
+    configuration = Configuration.from_yaml(config)
+    output.write(yaml.dump(configuration.model_dump()))
 
 
 @cli.command("trash")

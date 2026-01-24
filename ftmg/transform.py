@@ -2,8 +2,7 @@ from functools import cache
 import logging
 from pathlib import Path
 
-from followthemoney import Property, Schema
-import stringcase
+from followthemoney import Schema
 from followthemoney.entity import ValueEntity
 from followthemoney.types import registry
 from neo4j import Driver, Session
@@ -56,25 +55,6 @@ def should_reify_value(prop_type, value: str) -> bool:
 
 
 @cache
-def get_topic_label(config: Configuration, topic: str) -> str:
-    """Convert a topic code to a graph label.
-
-    Args:
-        topic: Topic code (e.g., "role.pep")
-
-    Returns:
-        Label name or None if topic should be skipped
-    """
-    label = config.nodes.topics.labels.get(topic)
-    if label is not None:
-        return label
-
-    label = topic.replace(".", " ")
-    label = stringcase.pascalcase(label)
-    return label
-
-
-@cache
 def get_schema_labels(config: Configuration, schema: Schema) -> list[str]:
     """Get the labels for a given schema name.
 
@@ -86,13 +66,9 @@ def get_schema_labels(config: Configuration, schema: Schema) -> list[str]:
     """
     labels = set()
     labels.add(ENTITY_LABEL)
-    if not schema.abstract:
-        schema_config = config.nodes.schemata.get(schema.name)
-        schema_label = schema.name
-        if schema_config and schema_config.label:
-            schema_label = schema_config.label
-        labels.add(schema_label)
-
+    schema_config = config.nodes.schemata.get(schema.name)
+    if schema_config is not None and not schema_config.ignore:
+        labels.add(schema_config.label)
     for parent in schema.extends:
         labels.update(get_schema_labels(config, parent))
     return sorted(labels)
@@ -110,10 +86,8 @@ def create_node_entity(
         session: Neo4j session
         proxy: Entity proxy to convert
     """
-    # Check if schema should be ignored
-    schema_node = config.nodes.schemata[proxy.schema.name]
-    if schema_node.ignore:
-        # log.debug("Ignoring entity %s (schema: %s)", proxy.id, proxy.schema.name)
+    sconfig = config.nodes.schemata.get(proxy.schema.name)
+    if sconfig is None or sconfig.ignore:
         return
 
     # Build properties dict
@@ -128,21 +102,14 @@ def create_node_entity(
     if proxy.referents:
         properties["referents"] = list(proxy.referents)
     # Process properties
-    featured = proxy.schema.featured
-    for prop in proxy.schema.sorted_properties:
-        if prop.hidden:
-            continue
-        if prop.type.matchable and not prop.matchable:
-            continue
+    for prop_name in sconfig.properties:
+        prop = proxy.schema.get(prop_name)
+        assert prop is not None
 
         values = proxy.get(prop)
         if not values:
             continue
-
-        # Inline featured properties or specific types
-        if prop.name in featured or prop.type in TYPES_INLINE:
-            # Store as array for multi-valued properties
-            properties[prop.name] = list(values)
+        properties[prop.name] = values
 
     # Create the node with all labels and properties
     labels_str = ":".join(get_schema_labels(config, proxy.schema))
@@ -164,10 +131,9 @@ def create_reified_values(
         session: Neo4j session
         proxy: Entity proxy
     """
-    for prop in proxy.schema.sorted_properties:
-        if prop.hidden:
-            continue
-        if prop.type not in TYPES_REIFY:
+    for prop in proxy.schema.properties.values():
+        pconfig = config.nodes.types.get(prop.type.name)
+        if pconfig is None or not pconfig.reify:
             continue
 
         values = proxy.get(prop)
@@ -183,7 +149,7 @@ def create_reified_values(
             caption = prop.type.caption(value)
             session.run(
                 f"""
-                MERGE (v:{prop.type.name} {{id: $id}})
+                MERGE (v:{pconfig.label} {{id: $id}})
                 SET v.caption = $caption
                 """,
                 id=node_id,
@@ -191,36 +157,18 @@ def create_reified_values(
             )
 
             # Create edge from entity to value node
-            edge_label = f"HAS_{stringcase.constcase(prop.type.name)}"
             datasets = list(proxy.datasets)
             session.run(
                 f"""
                 MATCH (e:Entity {{id: $entity_id}})
-                MATCH (v:{prop.type.name} {{id: $value_id}})
-                CREATE (e)-[r:{edge_label}]->(v)
+                MATCH (v:{pconfig.label} {{id: $value_id}})
+                CREATE (e)-[r:{pconfig.edge_label}]->(v)
                 SET r.datasets = $datasets
                 """,
                 entity_id=proxy.id,
                 value_id=node_id,
                 datasets=datasets,
             )
-
-
-@cache
-def get_prop_edge_label(config: Configuration, prop: Property) -> str:
-    """Get the edge label for a property-based edge.
-
-    Args:
-        config: Configuration for transformation
-        prop_qname: Qualified name of the property
-    Returns:
-        Edge label
-    """
-    prop_config = config.edges.properties.get(prop.qname)
-    if prop_config and prop_config.label:
-        return prop_config.label
-    # Default edge label
-    return stringcase.constcase(prop.label)
 
 
 def create_entity_links(
@@ -242,11 +190,9 @@ def create_entity_links(
         if prop.type != registry.entity:
             continue
 
-        prop_config = config.edges.properties.get(prop.qname)
-        if prop_config and prop_config.ignore:
+        pconfig = config.edges.properties.get(prop.qname)
+        if pconfig is None or pconfig.ignore:
             continue
-
-        edge_label = get_prop_edge_label(config, prop)
 
         for value in proxy.get(prop):
             target_id = prop.type.node_id(value)
@@ -256,7 +202,7 @@ def create_entity_links(
                 f"""
                 MATCH (s:Entity {{id: $source_id}})
                 MATCH (t:Entity {{id: $target_id}})
-                CREATE (s)-[r:{edge_label}]->(t)
+                CREATE (s)-[r:{pconfig.label}]->(t)
                 """,
                 source_id=entity_id,
                 target_id=target_id,
@@ -280,17 +226,15 @@ def create_topic_labels(
         return
     for topic in proxy.get_type_values(registry.topic):
         # Check if topic should be ignored
-        if topic in config.nodes.topics.ignore:
+        tconfig = config.nodes.topics.get(topic)
+        if tconfig is None or tconfig.ignore:
             continue
-
-        # Get label from config or default mapping
-        topic_label = get_topic_label(config, topic)
 
         # Add the topic label to the node
         session.run(
             f"""
             MATCH (n:Entity {{id: $id}})
-            SET n:{topic_label}
+            SET n:{tconfig.label}
             """,
             id=entity_id,
         )
@@ -309,9 +253,8 @@ def create_edge_entity(
         proxy: Edge entity proxy
     """
     # Check if schema should be ignored
-    schema_config = config.edges.schemata.get(proxy.schema.name)
-    if schema_config and schema_config.ignore:
-        log.debug("Ignoring edge %s (schema: %s)", proxy.id, proxy.schema.name)
+    sconfig = config.edges.schemata.get(proxy.schema.name)
+    if sconfig is None or sconfig.ignore:
         return
 
     source_prop = proxy.schema.source_prop
@@ -322,11 +265,6 @@ def create_edge_entity(
 
     sources = proxy.get(source_prop)
     targets = proxy.get(target_prop)
-
-    # Determine edge label
-    edge_label = schema_config.label if schema_config and schema_config.label else None
-    if not edge_label:
-        edge_label = stringcase.constcase(proxy.schema.name)
 
     # Build edge properties
     edge_props: dict[str, str | list[str]] = {"caption": proxy.caption}
@@ -355,12 +293,11 @@ def create_edge_entity(
                 f"""
                 MATCH (s:Entity {{id: $source_id}})
                 MATCH (t:Entity {{id: $target_id}})
-                CREATE (s)-[r:{edge_label}]->(t)
+                CREATE (s)-[r:{sconfig.label}]->(t)
                 SET r = $props
                 """,
                 source_id=source_id,
                 target_id=target_id,
-                edge_label=edge_label,
                 props=edge_props,
             )
 
