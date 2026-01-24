@@ -2,6 +2,7 @@ db:
   url: bolt://localhost:7687
   username: neo4j
   password: banana123
+  batch: 10000
 
 nodes:
   schemata:

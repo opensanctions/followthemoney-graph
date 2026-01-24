@@ -7,6 +7,16 @@ from followthemoney import model, registry
 from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+ENTITY_IGNORE_PROP_TYPES = (
+    registry.entity,
+    registry.html,
+    registry.text,
+    registry.checksum,
+    registry.json,
+    registry.topic,
+    registry.mimetype,
+)
+
 
 class DatabaseConfig(BaseSettings):
     """Database connection settings."""
@@ -16,7 +26,7 @@ class DatabaseConfig(BaseSettings):
     url: str
     username: str
     password: str
-    batch: int = 50_000
+    batch: int = 10_000
 
 
 class TypeReificationConfig(BaseModel):
@@ -65,7 +75,7 @@ class NodesConfig(BaseModel):
             sconfig["label"] = sconfig.get("label", schema.name)
             inline_properties: list[str] = []
             for prop in schema.properties.values():
-                if prop.type == registry.entity or prop.hidden:
+                if prop.hidden or prop.type in ENTITY_IGNORE_PROP_TYPES:
                     continue
                 inline_properties.append(prop.name)
             sconfig["properties"] = sconfig.get("properties", inline_properties)

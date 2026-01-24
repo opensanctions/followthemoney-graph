@@ -5,7 +5,7 @@ from typing import TextIO
 import yaml
 import click
 
-from ftmg.backend import delete_all, get_driver
+from ftmg.backend import create_indexes, delete_all, get_driver
 from ftmg.config import Configuration
 from ftmg.transform import load_entities
 
@@ -18,6 +18,8 @@ def cli() -> None:
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+    # Suppress verbose Neo4j logging
+    logging.getLogger("neo4j").setLevel(logging.WARNING)
 
 
 @cli.command("check-config")
@@ -85,6 +87,7 @@ def load_command(config: Path, source: Path) -> None:
     """
     configuration = Configuration.from_yaml(config)
     driver = get_driver(configuration)
+    create_indexes(configuration, driver)
     try:
         load_entities(configuration, driver, source)
     finally:
