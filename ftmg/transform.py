@@ -2,9 +2,11 @@ from collections import defaultdict
 from functools import cache
 import logging
 from pathlib import Path
-from typing import Generator, LiteralString, NamedTuple, cast
+from typing import Generator, LiteralString, NamedTuple, Optional, cast
 
 from normality import squash_spaces
+from rigour.urls import clean_url_compare
+from rigour.ids import StrictFormat
 from followthemoney import Schema
 from followthemoney.entity import ValueEntity
 from followthemoney.types import registry
@@ -27,7 +29,7 @@ class QueryBatch(NamedTuple):
     params: QueryParams
 
 
-def should_reify_value(prop_type, value: str) -> bool:
+def reified_node_value(prop_type, value: str) -> Optional[str]:
     """Check if a property value should be reified into a separate node.
 
     Args:
@@ -38,14 +40,31 @@ def should_reify_value(prop_type, value: str) -> bool:
         True if the value should be reified
     """
     # Filter out short identifiers
-    if prop_type == registry.identifier and len(value) < 7:
-        return False
+    if prop_type == registry.identifier:
+        if len(value) < 7:
+            return None
+        return StrictFormat.normalize(value)
+
+    if prop_type == registry.phone:
+        value = value.replace("+", "00")
+        digits = "".join(c for c in value if c.isdigit())
+        if len(digits) < 5:
+            return None
+        return digits
+
+    if prop_type == registry.url:
+        return clean_url_compare(value)
 
     # Filter out names with no spaces
-    if prop_type == registry.name and " " not in value:
-        return False
+    if prop_type == registry.name:
+        if " " not in value:
+            return None
 
-    return True
+    if prop_type in registry.email:
+        # Do not reify dates
+        return value.lower()
+
+    return value
 
 
 @cache
@@ -134,10 +153,11 @@ def generate_reified_values(
         type_ = registry.get(type_name)
         values = proxy.get_type_values(type_, matchable=True)
         for value in values:
-            if not should_reify_value(type_, value):
+            node_value = reified_node_value(type_, value)
+            if node_value is None:
                 continue
 
-            node_id = type_.node_id(value)
+            node_id = type_.node_id(node_value)
             if node_id is None:
                 continue
 
