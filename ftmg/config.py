@@ -63,7 +63,12 @@ class NodesConfig(BaseModel):
             if schema is None or schema.edge or schema.abstract:
                 raise ValueError(f"Node schemata refers to invalid schema: {name}")
             sconfig["label"] = sconfig.get("label", schema.name)
-            sconfig["properties"] = sconfig.get("properties", schema.featured)
+            inline_properties: list[str] = []
+            for prop in schema.properties.values():
+                if prop.type == registry.entity or prop.hidden:
+                    continue
+                inline_properties.append(prop.name)
+            sconfig["properties"] = sconfig.get("properties", inline_properties)
         config["schemata"] = schemata
 
         # Fill in any missing type reification configs from the model:
@@ -139,7 +144,12 @@ class EdgesConfig(BaseModel):
                 raise ValueError(f"Edge schemata refers to invalid edge schema: {name}")
             label = stringcase.constcase(schema.edge_label)
             sconfig["label"] = sconfig.get("label", label)
-            sconfig["properties"] = sconfig.get("properties", schema.featured)
+            inline_properties: list[str] = []
+            for prop in schema.properties.values():
+                if prop.type == registry.entity or prop.hidden:
+                    continue
+                inline_properties.append(prop.name)
+            sconfig["properties"] = sconfig.get("properties", inline_properties)
         config["schemata"] = schemata
 
         # Entity properties that are meant to be turned into edges:

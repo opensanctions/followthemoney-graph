@@ -25,6 +25,10 @@ nodes:
       reify: true
 
   topics:
+    "sanction.counter":
+      label: "CounterSanctions"
+    "sanction.linked":
+      label: "SanctionLinked"
     "gov.soe":
       label: "SOE"
     "gov.igo":
@@ -47,14 +51,38 @@ nodes:
       label: "PersonOfInterest"
     "sanction":
       label: "Sanctioned"
-    "sanction.linked":
-      label: "SanctionLinked"
-    "sanction.counter":
-      label: "CounterSanctioned"
+    "corp.offshore":
+      label: "Offshore"
     "export.control":
       label: "ExportControlled"
     "export.risk":
       label: "TradeRisk"
+    "mare.sts":
+      label: "ShipToShip"
+    "mare.shadow":
+      label: "ShadowFleet"
+    "mare.detained":
+      label: "DetainedVessel"
+    "fin.bank":
+      label: "Bank"
+    "fin":
+      label: "FinancialServices"
+    "crime.fin":
+      label: "FinancialCrime"
+    "crime.terror":
+      label: "Terrorism"
+    "crime.war":
+      label: "WarCrime"
+    "crime.cyber":
+      label: "CyberCrime"
+    "debarment":
+      label: "DebarredEntity"
+    "reg.action":
+      label: "RegulatorAction"
+    "reg.warn":
+      label: "RegulatorWarning"
+    "corp.disqual":
+      label: "CorporateDisqualification"
     "gov.national":
       ignore: true
     "gov.state":

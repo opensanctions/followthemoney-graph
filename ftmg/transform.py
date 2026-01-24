@@ -1,7 +1,10 @@
+from collections import defaultdict
 from functools import cache
 import logging
 from pathlib import Path
+from typing import Generator, LiteralString, NamedTuple, cast
 
+from normality import squash_spaces
 from followthemoney import Schema
 from followthemoney.entity import ValueEntity
 from followthemoney.types import registry
@@ -13,6 +16,15 @@ from ftmg.read import read_entities
 log = logging.getLogger(__name__)
 
 ENTITY_LABEL = "Entity"
+
+QueryParams = dict[str, str | list[str] | dict[str, str | list[str]]]
+
+
+class QueryBatch(NamedTuple):
+    """A query with its parameters to be batched."""
+
+    query: str
+    params: QueryParams
 
 
 def should_reify_value(prop_type, value: str) -> bool:
@@ -47,7 +59,6 @@ def get_schema_labels(config: Configuration, schema: Schema) -> list[str]:
         Set of labels
     """
     labels = set()
-    labels.add(ENTITY_LABEL)
     schema_config = config.nodes.schemata.get(schema.name)
     if schema_config is not None and not schema_config.ignore:
         labels.add(schema_config.label)
@@ -56,17 +67,18 @@ def get_schema_labels(config: Configuration, schema: Schema) -> list[str]:
     return sorted(labels)
 
 
-def create_node_entity(
+def generate_node_entity(
     config: Configuration,
-    session: Session,
     proxy: ValueEntity,
-) -> None:
-    """Create a node from an FTM entity.
+) -> Generator[QueryBatch, None, None]:
+    """Generate node creation and label queries from an FTM entity.
 
     Args:
         config: Configuration for transformation
-        session: Neo4j session
         proxy: Entity proxy to convert
+
+    Yields:
+        QueryBatch with CREATE query and properties, plus label queries
     """
     sconfig = config.nodes.schemata.get(proxy.schema.name)
     if sconfig is None or sconfig.ignore:
@@ -76,42 +88,50 @@ def create_node_entity(
     properties: dict[str, str | list[str]] = {
         "id": proxy.id,
         "caption": proxy.caption,
+        "datasets": list(proxy.datasets),
     }
 
-    # Add metadata
-    if proxy.datasets:
-        properties["datasets"] = list(proxy.datasets)
-    if proxy.referents:
-        properties["referents"] = list(proxy.referents)
     # Process properties
     for prop_name in sconfig.properties:
         prop = proxy.schema.get(prop_name)
         assert prop is not None
 
         values = proxy.get(prop)
-        if not values:
-            continue
-        properties[prop.name] = values
+        if len(values):
+            properties[prop.name] = values
 
-    # Create the node with all labels and properties
-    labels_str = ":".join(get_schema_labels(config, proxy.schema))
-    session.run(
-        f"CREATE (n:{labels_str}) SET n = $props",
-        props=properties,
-    )
+    # Create node with just Entity label
+    create_query = f"""
+    UNWIND $batch AS props
+    CREATE (n:{ENTITY_LABEL})
+    SET n = props
+    """
+    yield QueryBatch(query=create_query, params=properties)
+
+    # Add schema labels
+    entity_id = proxy.id
+    labels = get_schema_labels(config, proxy.schema)
+    for label in labels:
+        label_query = f"""
+        UNWIND $batch AS id
+        MATCH (n:{ENTITY_LABEL} {{id: id}})
+        SET n:{label}
+        """
+        yield QueryBatch(query=label_query, params=entity_id)
 
 
-def create_reified_values(
+def generate_reified_values(
     config: Configuration,
-    session: Session,
     proxy: ValueEntity,
-) -> None:
-    """Create reified value nodes and edges for an entity's properties.
+) -> Generator[QueryBatch, None, None]:
+    """Generate reified value node and edge queries for an entity's properties.
 
     Args:
-        config: Configuration for transformation (unused, reserved for future use)
-        session: Neo4j session
+        config: Configuration for transformation
         proxy: Entity proxy
+
+    Yields:
+        QueryBatch for value node creation (MERGE) and edge creation
     """
     for prop in proxy.schema.properties.values():
         pconfig = config.nodes.types.get(prop.type.name)
@@ -127,47 +147,54 @@ def create_reified_values(
             if node_id is None:
                 continue
 
-            # Create value node
             caption = prop.type.caption(value)
-            session.run(
-                f"""
-                MERGE (v:{pconfig.label} {{id: $id}})
-                SET v.caption = $caption
-                """,
-                id=node_id,
-                caption=caption,
+
+            # Yield the value node query
+            node_query = f"""
+            UNWIND $batch AS props
+            MERGE (n:{pconfig.label} {{id: props.id}})
+            SET n.caption = props.caption
+            """
+            yield QueryBatch(
+                query=node_query, params={"id": node_id, "caption": caption}
             )
 
-            # Create edge from entity to value node
+            # Yield the edge query
+            edge_query = f"""
+            UNWIND $batch AS item
+            MATCH (e:Entity {{id: item.source_id}})
+            MATCH (v {{id: item.target_id}})
+            CREATE (e)-[r:{pconfig.edge_label}]->(v)
+            SET r = item.props
+            """
             datasets = list(proxy.datasets)
-            session.run(
-                f"""
-                MATCH (e:Entity {{id: $entity_id}})
-                MATCH (v:{pconfig.label} {{id: $value_id}})
-                CREATE (e)-[r:{pconfig.edge_label}]->(v)
-                SET r.datasets = $datasets
-                """,
-                entity_id=proxy.id,
-                value_id=node_id,
-                datasets=datasets,
+            yield QueryBatch(
+                query=edge_query,
+                params={
+                    "source_id": proxy.id,
+                    "target_id": node_id,
+                    "props": {"datasets": datasets},
+                },
             )
 
 
-def create_entity_links(
+def generate_entity_links(
     config: Configuration,
-    session: Session,
     proxy: ValueEntity,
-) -> None:
-    """Create edges for entity-reference properties.
+) -> Generator[QueryBatch, None, None]:
+    """Generate edge queries for entity-reference properties.
 
     Args:
-        config: Configuration for transformation (unused, reserved for future use)
-        session: Neo4j session
+        config: Configuration for transformation
         proxy: Entity proxy
+
+    Yields:
+        QueryBatch for entity reference edge creation
     """
     entity_id = registry.entity.node_id_safe(proxy.id)
     if entity_id is None:
         return
+
     for prop in proxy.schema.sorted_properties:
         if prop.type != registry.entity:
             continue
@@ -180,59 +207,66 @@ def create_entity_links(
             target_id = prop.type.node_id(value)
             if target_id is None:
                 continue
-            session.run(
-                f"""
-                MATCH (s:Entity {{id: $source_id}})
-                MATCH (t:Entity {{id: $target_id}})
-                CREATE (s)-[r:{pconfig.label}]->(t)
-                """,
-                source_id=entity_id,
-                target_id=target_id,
+
+            query = f"""
+            UNWIND $batch AS item
+            MATCH (s:Entity {{id: item.source_id}})
+            MATCH (t:Entity {{id: item.target_id}})
+            CREATE (s)-[r:{pconfig.label}]->(t)
+            SET r = item.props
+            """
+            yield QueryBatch(
+                query=query,
+                params={
+                    "source_id": entity_id,
+                    "target_id": target_id,
+                    "props": {},
+                },
             )
 
 
-def create_topic_labels(
+def generate_topic_labels(
     config: Configuration,
-    session: Session,
     proxy: ValueEntity,
-) -> None:
-    """Add topic labels to entity nodes.
+) -> Generator[QueryBatch, None, None]:
+    """Generate topic label queries for an entity.
 
     Args:
         config: Configuration for transformation
-        session: Neo4j session
         proxy: Entity proxy
+
+    Yields:
+        QueryBatch for adding topic labels to nodes
     """
     entity_id = registry.entity.node_id_safe(proxy.id)
     if entity_id is None:
         return
+
     for topic in proxy.get_type_values(registry.topic):
-        # Check if topic should be ignored
         tconfig = config.nodes.topics.get(topic)
         if tconfig is None or tconfig.ignore:
             continue
 
-        # Add the topic label to the node
-        session.run(
-            f"""
-            MATCH (n:Entity {{id: $id}})
-            SET n:{tconfig.label}
-            """,
-            id=entity_id,
-        )
+        query = f"""
+        UNWIND $batch AS id
+        MATCH (n:Entity {{id: id}})
+        SET n:{tconfig.label}
+        """
+        yield QueryBatch(query=query, params=entity_id)
 
 
-def create_edge_entity(
+def generate_edge_entity(
     config: Configuration,
-    session: Session,
     proxy: ValueEntity,
-) -> None:
-    """Create an edge from an FTM relationship entity.
+) -> Generator[QueryBatch, None, None]:
+    """Generate edge queries from an FTM relationship entity.
 
     Args:
         config: Configuration for transformation
-        session: Neo4j session
         proxy: Edge entity proxy
+
+    Yields:
+        QueryBatch for relationship edge creation
     """
     # Check if schema should be ignored
     sconfig = config.edges.schemata.get(proxy.schema.name)
@@ -249,39 +283,75 @@ def create_edge_entity(
     targets = proxy.get(target_prop)
 
     # Build edge properties
-    edge_props: dict[str, str | list[str]] = {"caption": proxy.caption}
-
-    if proxy.datasets:
-        edge_props["datasets"] = list(proxy.datasets)
-    if proxy.referents:
-        edge_props["referents"] = list(proxy.referents)
+    props: dict[str, str | list[str]] = {
+        "id": proxy.id,
+        # "caption": proxy.caption,
+        "datasets": list(proxy.datasets),
+        # "referents": list(proxy.referents),
+    }
 
     # Add featured properties
-    for prop_name in proxy.schema.featured:
+    for prop_name in sconfig.properties:
         prop = proxy.schema.get(prop_name)
         if not prop or prop == source_prop or prop == target_prop:
             continue
         values = proxy.get(prop)
-        if values:
-            edge_props[prop.name] = values
+        if len(values):
+            props[prop.name] = values
 
-    # Create edges for all source/target combinations
+    # Generate edges for all source/target combinations
+    query = f"""
+    UNWIND $batch AS item
+    MATCH (s:Entity {{id: item.source_id}})
+    MATCH (t:Entity {{id: item.target_id}})
+    CREATE (s)-[r:{sconfig.label}]->(t)
+    SET r = item.props
+    """
+
     for source_id in sources:
         for target_id in targets:
             if source_id == target_id:
                 continue
 
-            session.run(
-                f"""
-                MATCH (s:Entity {{id: $source_id}})
-                MATCH (t:Entity {{id: $target_id}})
-                CREATE (s)-[r:{sconfig.label}]->(t)
-                SET r = $props
-                """,
-                source_id=source_id,
-                target_id=target_id,
-                props=edge_props,
+            yield QueryBatch(
+                query=query,
+                params={
+                    "source_id": source_id,
+                    "target_id": target_id,
+                    "props": props,
+                },
             )
+
+
+class QueryBatcher:
+    def __init__(self, config: Configuration, session: Session) -> None:
+        self.queries: dict[str, list[QueryParams]] = defaultdict(list)
+        self.queries_count: dict[str, int] = defaultdict(int)
+        self.batch_size = config.db.batch
+        self.session = session
+
+    def add(self, batch: QueryBatch) -> None:
+        self.queries[batch.query].append(batch.params)
+        self.queries_count[batch.query] += 1
+        if self.queries_count[batch.query] >= self.batch_size:
+            self.flush_query(batch.query)
+
+    def consume(self, batches: Generator[QueryBatch, None, None]) -> None:
+        for batch in batches:
+            self.add(batch)
+
+    def flush_query(self, query: str) -> None:
+        batch = self.queries.pop(query, [])
+        log.info(
+            "Flushing query (%d items): %s",
+            len(batch),
+            squash_spaces(query),
+        )
+        self.session.run(cast(LiteralString, query), batch=batch)
+
+    def flush(self) -> None:
+        for query in list(self.queries.keys()):
+            self.flush_query(query)
 
 
 def load_entities(
@@ -289,58 +359,56 @@ def load_entities(
     driver: Driver,
     source_path: Path,
 ) -> None:
-    """Load FTM entities into Neo4j with full transformation.
+    """Load FTM entities into Neo4j with batched transformation.
 
     This uses a two-pass approach by reading the file twice:
-    1. First pass: Create all nodes and their reified values
-    2. Second pass: Create all edges (entity links and edge entities)
+    1. First pass: Collect all node-related queries
+    2. Second pass: Collect all edge-related queries
 
-    This ensures that edge entities can reference nodes regardless of
-    ordering in the input file, without loading all entities into memory.
+    Queries are grouped by their query string and parameters are batched.
 
     Args:
         config: Configuration for transformation
         driver: Neo4j driver instance
-        data_path: Path to the entities data file
-        batch_size: Number of entities to load per transaction
+        source_path: Path to the entities data file
     """
-    node_count = 0
-    edge_count = 0
-
-    # PASS 1: Create all nodes and reified values
-    log.info("Pass 1: Creating nodes and reified values...")
+    # PASS 1: Collect all node queries
+    log.info("Pass 1: Collecting node queries...")
     with driver.session() as session:
+        batcher = QueryBatcher(config, session)
+
         for entity in read_entities(source_path):
-            # Process only node entities
             if entity.schema.edge:
                 continue
 
-            create_node_entity(config, session, entity)
-            create_reified_values(config, session, entity)
-            create_topic_labels(config, session, entity)
-            node_count += 1
-            if node_count > 0 and node_count % 1000 == 0:
-                log.info("Created %d nodes", node_count)
+            # Collect entity node queries
+            batcher.consume(generate_node_entity(config, entity))
 
-    # PASS 2: Create all edges
-    log.info("Pass 2: Creating edges...")
-    with driver.session() as session:
+            # Collect reified value queries
+            batcher.consume(generate_reified_values(config, entity))
+
+            # Collect topic label queries
+            batcher.consume(generate_topic_labels(config, entity))
+
+        # Execute batched queries
+        total_nq = sum(batcher.queries_count.values())
+        batcher.flush()
+        log.info("Executed %d distinct node queries...", total_nq)
+
+        # PASS 2: Collect all edge queries
+        log.info("Pass 2: Collecting edge queries...")
+
         for entity in read_entities(source_path):
-            # Process entity links from node entities
             if entity.schema.edge:
-                create_edge_entity(config, session, entity)
-                edge_count += 1
+                # Edge entities
+                batcher.consume(generate_edge_entity(config, entity))
+            else:
+                # Entity links
+                batcher.consume(generate_entity_links(config, entity))
 
-            if not entity.schema.edge:
-                create_entity_links(config, session, entity)
-                edge_count += 1
+        # Execute batched edge queries
+        total_eq = sum(batcher.queries_count.values()) - total_nq
+        batcher.flush()
+        log.info("Executed %d distinct edge queries...", total_eq)
 
-            if edge_count > 0 and edge_count % 1000 == 0:
-                log.info("Created %d edges from batch", edge_count)
-
-    log.info(
-        "Finished loading %d entities (%d nodes, %d edges)",
-        node_count + edge_count,
-        node_count,
-        edge_count,
-    )
+    log.info("Finished loading entities")
