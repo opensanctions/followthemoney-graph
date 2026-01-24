@@ -25,26 +25,42 @@ nodes:
       reify: true
 
   topics:
-    labels:
-      "gov.soe": "SOE"
-      "gov.igo": "IGO"
-      "gov.head": "HeadOfState"
-      "gov.executive": "Executive"
-      "gov.legislative": "Legislative"
-      "gov.judicial": "Judicial"
-      "gov.financial": "CentralBanking"
-      "role.rca": "CloseAssociate"
-      "role.pep": "Politician"
-      "poi": "PersonOfInterest"
-      "sanction": "Sanctioned"
-      "sanction.linked": "SanctionLinked"
-      "sanction.counter": "CounterSanctioned"
-      "export.control": "ExportControlled"
-      "export.risk": "TradeRisk"
-    ignore:
-      - "gov.national"
-      - "gov.state"
-      - "gov.muni"
+    "gov.soe":
+      label: "SOE"
+    "gov.igo":
+      label: "IGO"
+    "gov.head":
+      label: "HeadOfState"
+    "gov.executive":
+      label: "Executive"
+    "gov.legislative":
+      label: "Legislative"
+    "gov.judicial":
+      label: "Judicial"
+    "gov.financial":
+      label: "CentralBanking"
+    "role.rca":
+      label: "CloseAssociate"
+    "role.pep":
+      label: "Politician"
+    "poi":
+      label: "PersonOfInterest"
+    "sanction":
+      label: "Sanctioned"
+    "sanction.linked":
+      label: "SanctionLinked"
+    "sanction.counter":
+      label: "CounterSanctioned"
+    "export.control":
+      label: "ExportControlled"
+    "export.risk":
+      label: "TradeRisk"
+    "gov.national":
+      ignore: true
+    "gov.state":
+      ignore: true
+    "gov.muni":
+      ignore: true
 
 edges:
   schemata:

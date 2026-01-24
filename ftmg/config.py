@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from followthemoney import model
+from followthemoney import model, registry
 from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -47,13 +47,33 @@ class NodesConfig(BaseModel):
     types: dict[str, TypeReificationConfig] = Field(default_factory=dict)
     topics: TopicsConfig = Field(default_factory=TopicsConfig)
 
+    @model_validator(mode="before")
+    @classmethod
+    def complete_model(cls, config: dict[str, Any]) -> dict[str, Any]:
+        """Fill in any missing schemata from the model."""
+        schemata = config.get("schemata", {})
+        if not isinstance(schemata, dict):
+            raise ValueError("Nodes 'schemata' must be a dictionary.")
+        # Fill in any missing node schemata from the model:
+        for schema in model.schemata.values():
+            if not schema.edge and schema.name not in schemata:
+                schemata[schema.name] = {}
+        for name, sconfig in schemata.items():
+            schema = model.get(name)
+            if schema is None or schema.edge:
+                raise ValueError(f"Node schemata refers to invalid schema: {name}")
+            sconfig["label"] = sconfig.get("label") or schema.name
+            sconfig["properties"] = sconfig.get("properties", schema.featured)
+
+        return config
+
 
 class SchemaEdgeConfig(BaseModel):
     """Configuration for a specific edge schema."""
 
     ignore: bool = False
-    label: str | None = None
-    properties: list[str] | None = None
+    label: str
+    properties: list[str]
 
 
 class PropertyEdgeConfig(BaseModel):
@@ -71,15 +91,30 @@ class EdgesConfig(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def ensure_dicts(cls, config: dict[str, Any]) -> dict[str, Any]:
+    def complete_model(cls, config: dict[str, Any]) -> dict[str, Any]:
         """Ensure that schemata and properties are dictionaries."""
         schemata = config.get("schemata", {})
         if not isinstance(schemata, dict):
             raise ValueError("Edges 'schemata' must be a dictionary.")
-        edge_schemata = [s for s in model.schemata.values() if s.edge]
+        # Fill in any missing edge schemata from the model
+        for schema in model.schemata.values():
+            if schema.edge and schema.name not in schemata:
+                schemata[schema.name] = {}
+        for name, sconfig in schemata.items():
+            schema = model.get(name)
+            if schema is None or not schema.edge:
+                raise ValueError(f"Edge schemata refers to invalid edge schema: {name}")
+            sconfig["label"] = sconfig.get("label") or schema.name
+            sconfig["properties"] = sconfig.get("properties", schema.featured)
+
         properties = config.get("properties", {})
         if not isinstance(properties, dict):
             raise ValueError("Edges 'properties' must be a dictionary.")
+        for name, pconfig in properties.items():
+            prop = model.get_qname(name)
+            if prop is None or prop.type != registry.entity:
+                raise ValueError(f"Edge properties refers to invalid property: {name}")
+            # pconfig["label"] = pconfig.get("label") or prop.name
         return config
 
 

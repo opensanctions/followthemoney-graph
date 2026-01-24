@@ -111,8 +111,8 @@ def create_node_entity(
         proxy: Entity proxy to convert
     """
     # Check if schema should be ignored
-    schema_config = config.nodes.schemata.get(proxy.schema.name)
-    if schema_config and schema_config.ignore:
+    schema_node = config.nodes.schemata[proxy.schema.name]
+    if schema_node.ignore:
         # log.debug("Ignoring entity %s (schema: %s)", proxy.id, proxy.schema.name)
         return
 
