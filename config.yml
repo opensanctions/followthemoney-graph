@@ -79,6 +79,8 @@ nodes:
       label: "WarCrime"
     "crime.cyber":
       label: "CyberCrime"
+    "crime.theft":
+      label: "Theft"
     "debarment":
       label: "DebarredEntity"
     "reg.action":

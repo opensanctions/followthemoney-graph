@@ -8,6 +8,7 @@ from normality import squash_spaces
 from rigour.urls import clean_url_compare
 from rigour.ids import StrictFormat
 from followthemoney import Schema
+from followthemoney.types import PropertyType
 from followthemoney.entity import ValueEntity
 from followthemoney.types import registry
 from neo4j import Driver, Session
@@ -29,7 +30,7 @@ class QueryBatch(NamedTuple):
     params: QueryParams
 
 
-def reified_node_value(prop_type, value: str) -> Optional[str]:
+def reified_node_value(prop_type: PropertyType, value: str) -> Optional[str]:
     """Check if a property value should be reified into a separate node.
 
     Args:
@@ -60,7 +61,7 @@ def reified_node_value(prop_type, value: str) -> Optional[str]:
         if " " not in value:
             return None
 
-    if prop_type in registry.email:
+    if prop_type == registry.email:
         # Do not reify dates
         return value.lower()
 
