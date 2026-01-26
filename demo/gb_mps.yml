@@ -1,0 +1,36 @@
+gb_parliament_57:
+  queries:
+    - csv_url: http://bit.ly/uk-mps-csv
+      entities:
+        member:
+          schema: Person
+          keys:
+            - id
+          properties:
+            name:
+              column: name
+            email:
+              column: email
+            alias:
+              column: sort_name
+            gender:
+              column: gender
+            country:
+              constant: "gb"
+        party:
+          schema: Organization
+          keys:
+            - group_id
+          properties:
+            name:
+              column: group
+        membership:
+          schema: Membership
+          keys:
+            - id
+            - group_id
+          properties:
+            organization:
+              entity: party
+            member:
+              entity: member
