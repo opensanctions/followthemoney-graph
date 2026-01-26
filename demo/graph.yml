@@ -1,0 +1,108 @@
+db:
+  url: bolt://localhost:7687
+  username: neo4j
+  password: banana123
+
+nodes:
+  schemata:
+    Position:
+      ignore: true
+    Address:
+      ignore: true
+    Sanction:
+      ignore: true
+    Security:
+      ignore: true
+    Passport:
+      ignore: true
+    Identification:
+      ignore: true
+    Person:
+      label: "Human"
+
+  types:
+    name:
+      reify: true
+    address:
+      reify: true
+    identifier:
+      reify: true
+    phone:
+      reify: true
+    email:
+      reify: true
+    url:
+      reify: true
+
+  topics:
+    "sanction.counter":
+      label: "CounterSanctions"
+    "sanction.linked":
+      label: "SanctionLinked"
+    "gov.soe":
+      label: "SOE"
+    "gov.igo":
+      label: "IGO"
+    "gov.head":
+      label: "HeadOfState"
+    "gov.executive":
+      label: "Executive"
+    "gov.legislative":
+      label: "Legislative"
+    "gov.judicial":
+      label: "Judicial"
+    "gov.financial":
+      label: "CentralBanking"
+    "role.rca":
+      label: "CloseAssociate"
+    "role.pep":
+      label: "Politician"
+    "poi":
+      label: "PersonOfInterest"
+    "sanction":
+      label: "Sanctioned"
+    "corp.offshore":
+      label: "Offshore"
+    "export.control":
+      label: "ExportControlled"
+    "export.risk":
+      label: "TradeRisk"
+    "mare.sts":
+      label: "ShipToShip"
+    "mare.shadow":
+      label: "ShadowFleet"
+    "mare.detained":
+      label: "DetainedVessel"
+    "fin.bank":
+      label: "Bank"
+    "fin":
+      label: "FinancialServices"
+    "crime.fin":
+      label: "FinancialCrime"
+    "crime.terror":
+      label: "Terrorism"
+    "crime.war":
+      label: "WarCrime"
+    "crime.cyber":
+      label: "CyberCrime"
+    "crime.theft":
+      label: "Theft"
+    "debarment":
+      label: "DebarredEntity"
+    "reg.action":
+      label: "RegulatorAction"
+    "reg.warn":
+      label: "RegulatorWarning"
+    "corp.disqual":
+      label: "CorporateDisqualification"
+    "gov.national":
+      ignore: true
+    "gov.state":
+      ignore: true
+    "gov.muni":
+      ignore: true
+
+edges:
+  schemata:
+    Occupancy:
+      ignore: true

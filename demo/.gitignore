@@ -1,0 +1,5 @@
+data/
+nomenklatura.db*
+xref-index
+*.json
+*.csv
