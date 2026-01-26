@@ -7,7 +7,7 @@ data/mps.aggregated.json: data/mps.json
 	ftm aggregate -i $< -o $@
 
 data/mps.statements.csv: data/mps.json
-	ftm statements -f csv -i $< -o $@
+	ftm statements -f csv $< -o $@
 
 xref-mps: data/mps.aggregated.json
 	nk xref --algorithm er-unstable data/mps.aggregated.json
