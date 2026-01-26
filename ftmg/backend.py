@@ -1,5 +1,5 @@
 import logging
-from typing import LiteralString, cast
+from typing import LiteralString, Set, cast
 
 from neo4j import Driver, GraphDatabase
 
@@ -82,6 +82,43 @@ def create_indexes(config: Configuration, driver: Driver) -> None:
         log.info("Created %d unique constraints total", constraints_created)
 
 
+def prune_unused_unique_constraints(driver: Driver) -> None:
+    """
+    Find and delete unique constraints where no nodes use the constrained label.
+
+    Args:
+        driver: Neo4j driver instance
+
+    Returns:
+        List of deleted (or would-be-deleted) constraint names
+    """
+    removed: Set[str] = set()
+    with driver.session() as session:
+        # Get all unique constraints
+        result = session.run("SHOW CONSTRAINTS")
+        constraints = result.data()
+
+        for constraint in constraints:
+            if constraint["type"] != "UNIQUENESS":
+                continue
+            total_count = 0
+            for label in constraint["labelsOrTypes"]:
+                # Check if any nodes exist with this label
+                q = f"MATCH (n:`{label}`) RETURN count(n) AS cnt"
+                res = session.run(cast(LiteralString, q)).single()
+                if res is not None:
+                    total_count += res["cnt"]
+
+            removed.add(constraint["name"])
+
+            if total_count == 0:
+                q = f"DROP CONSTRAINT `{constraint['name']}`"
+                session.run(cast(LiteralString, q))
+
+    if len(removed) > 0:
+        log.info("Removed %d unused unique constraints: %r", len(removed), removed)
+
+
 def prune_reified_nodes(config: Configuration, driver: Driver) -> None:
     """Delete reified value nodes that are referenced by fewer than 2 unique entities.
 
@@ -148,34 +185,57 @@ def prune_reified_nodes(config: Configuration, driver: Driver) -> None:
         log.info("Total reified nodes pruned: %d", total_deleted)
 
 
-def delete_all(driver: Driver) -> None:
+def delete_all(driver: Driver, batch_size: int = 50_000) -> None:
     """Delete all nodes and relationships from the database.
+
+    Uses batched deletion to avoid transaction size limits and timeouts.
 
     Args:
         driver: Neo4j driver instance
+        batch_size: Number of nodes to delete per batch
     """
     with driver.session() as session:
         # First, get counts before deletion
         result = session.run("MATCH (n) RETURN count(n) as node_count")
         record = result.single()
-        node_count = record["node_count"] if record else 0
+        initial_node_count = record["node_count"] if record else 0
 
         result = session.run("MATCH ()-[r]->() RETURN count(r) as rel_count")
         record = result.single()
-        rel_count = record["rel_count"] if record else 0
+        initial_rel_count = record["rel_count"] if record else 0
 
         log.info(
             "Deleting %d nodes and %d relationships...",
-            node_count,
-            rel_count,
+            initial_node_count,
+            initial_rel_count,
         )
 
-        # Delete all nodes and relationships
+        # Delete nodes in batches
         # DETACH DELETE removes all relationships connected to nodes before deleting nodes
-        session.run("MATCH (n) DETACH DELETE n")
+        total_deleted = 0
+        while True:
+            query = """
+            MATCH (n)
+            WITH n LIMIT $batch_size
+            DETACH DELETE n
+            RETURN count(n) as deleted_count
+            """
+            result = session.run(cast(LiteralString, query), batch_size=batch_size)
+            record = result.single()
+            deleted_count = record["deleted_count"] if record else 0
+
+            total_deleted += deleted_count
+
+            if deleted_count > 0:
+                log.info("Deleted %d nodes, total: %d", deleted_count, total_deleted)
+
+            # If we deleted fewer than batch_size, we're done
+            if deleted_count < batch_size:
+                break
 
         log.info(
-            "Deleted %d nodes and %d relationships",
-            node_count,
-            rel_count,
+            "Deleted %d nodes total (had %d nodes, %d relationships)",
+            total_deleted,
+            initial_node_count,
+            initial_rel_count,
         )

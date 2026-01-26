@@ -5,7 +5,13 @@ from typing import TextIO
 import yaml
 import click
 
-from ftmg.backend import create_indexes, delete_all, get_driver, prune_reified_nodes
+from ftmg.backend import (
+    create_indexes,
+    delete_all,
+    get_driver,
+    prune_reified_nodes,
+    prune_unused_unique_constraints,
+)
 from ftmg.config import Configuration
 from ftmg.transform import load_entities
 
@@ -45,9 +51,6 @@ def check_config_command(config: Path, output: TextIO) -> None:
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     required=True,
 )
-@click.confirmation_option(
-    prompt="Are you sure you want to delete ALL nodes and relationships?"
-)
 def trash_command(config: Path) -> None:
     """Delete all nodes and relationships from the database.
 
@@ -61,6 +64,7 @@ def trash_command(config: Path) -> None:
     driver = get_driver(configuration)
     try:
         delete_all(driver)
+        prune_unused_unique_constraints(driver)
     finally:
         driver.close()
 
@@ -90,6 +94,7 @@ def load_command(config: Path, source: Path) -> None:
     create_indexes(configuration, driver)
     try:
         load_entities(configuration, driver, source)
+        prune_unused_unique_constraints(driver)
     finally:
         driver.close()
 
@@ -115,6 +120,7 @@ def prune_command(config: Path) -> None:
     driver = get_driver(configuration)
     try:
         prune_reified_nodes(configuration, driver)
+        prune_unused_unique_constraints(driver)
     finally:
         driver.close()
 
