@@ -263,8 +263,10 @@ def generate_topic_labels(
     Yields:
         QueryBatch for adding topic labels to nodes
     """
-    entity_id = registry.entity.node_id_safe(proxy.id)
-    if entity_id is None:
+    # entity_id = registry.entity.node_id_safe(proxy.id)
+    # if entity_id is None:
+    #     return
+    if proxy.id is None:
         return
 
     sconfig = config.nodes.schemata.get(proxy.schema.name)
@@ -276,12 +278,14 @@ def generate_topic_labels(
         if tconfig is None or tconfig.ignore:
             continue
 
+        # Note: Labels must be part of the query string, not parameterized
+        # Each unique topic+schema combination gets its own query
         query = f"""
-        UNWIND $batch AS id
-        MATCH (n:{sconfig.label} {{id: id}})
-        SET n:{tconfig.label}
+        UNWIND $batch AS item
+        MATCH (n:{sconfig.label} {{id: item.id}})
+        SET n:`{tconfig.label}`
         """
-        yield QueryBatch(query=query, params=entity_id)
+        yield QueryBatch(query=query, params={"id": proxy.id})
 
 
 def generate_edge_entity(
