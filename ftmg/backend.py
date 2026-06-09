@@ -1,5 +1,5 @@
 import logging
-from typing import LiteralString, Set, cast
+from typing import LiteralString, cast
 
 from neo4j import Driver, GraphDatabase
 
@@ -92,7 +92,7 @@ def prune_unused_unique_constraints(driver: Driver) -> None:
     Returns:
         List of deleted (or would-be-deleted) constraint names
     """
-    removed: Set[str] = set()
+    removed: set[str] = set()
     with driver.session() as session:
         # Get all unique constraints
         result = session.run("SHOW CONSTRAINTS")

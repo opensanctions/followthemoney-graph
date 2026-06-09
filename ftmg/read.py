@@ -1,5 +1,5 @@
+from collections.abc import Generator, Iterable
 from pathlib import Path
-from typing import Generator, Iterable
 
 from followthemoney import ValueEntity
 

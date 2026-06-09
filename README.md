@@ -253,12 +253,28 @@ mypy ftmg
 pytest --cov=ftmg --cov-report=html
 ```
 
+## Releasing
+
+Releases to [PyPI](https://pypi.org/project/followthemoney-graph/) are published
+automatically by the `build` GitHub Actions workflow when a version tag is pushed,
+using PyPI Trusted Publishing (OIDC) — no API token is stored in the repository.
+
+To cut a release:
+
+```bash
+bump2version patch   # or: minor / major — creates a commit and a vX.Y.Z tag
+git push --follow-tags
+```
+
+The tag push runs the test/lint/type-check job, builds the wheel + sdist, attaches
+a build-provenance attestation, and publishes to PyPI.
+
 ## Links
 
 - [FollowTheMoney Documentation](https://followthemoney.tech/)
 - [Neo4j Documentation](https://neo4j.com/docs/)
-- [GitHub Repository](https://github.com/opensanctions/followthemoney)
-- [Issue Tracker](https://github.com/opensanctions/followthemoney/issues)
+- [GitHub Repository](https://github.com/opensanctions/followthemoney-graph)
+- [Issue Tracker](https://github.com/opensanctions/followthemoney-graph/issues)
 
 ## License
 

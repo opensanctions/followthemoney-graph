@@ -1,8 +1,8 @@
 from pathlib import Path
 from typing import Any
 
-import yaml
 import stringcase
+import yaml
 from followthemoney import model, registry
 from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -69,12 +69,12 @@ class NodesConfig(BaseModel):
                 if not schema.edge and not schema.abstract:
                     schemata[schema.name] = {}
         for name, sconfig in schemata.items():
-            schema = model.get(name)
-            if schema is None or schema.edge or schema.abstract:
+            node_schema = model.get(name)
+            if node_schema is None or node_schema.edge or node_schema.abstract:
                 raise ValueError(f"Node schemata refers to invalid schema: {name}")
-            sconfig["label"] = sconfig.get("label", schema.name)
+            sconfig["label"] = sconfig.get("label", node_schema.name)
             inline_properties: list[str] = []
-            for prop in schema.properties.values():
+            for prop in node_schema.properties.values():
                 if prop.hidden or prop.type in ENTITY_IGNORE_PROP_TYPES:
                     continue
                 inline_properties.append(prop.name)
@@ -89,8 +89,8 @@ class NodesConfig(BaseModel):
         for name, tconfig in types.items():
             try:
                 type_ = registry.get(name)
-            except AttributeError:
-                raise ValueError(f"Types config refers to invalid type: {name}")
+            except AttributeError as err:
+                raise ValueError(f"Types config refers to invalid type: {name}") from err
             if not type_.matchable:
                 raise ValueError(f"Type is not matchable: {name}")
             tconfig["label"] = tconfig.get("label", type_.name)
@@ -149,13 +149,13 @@ class EdgesConfig(BaseModel):
             if schema.edge and schema.name not in schemata:
                 schemata[schema.name] = {}
         for name, sconfig in schemata.items():
-            schema = model.get(name)
-            if schema is None or not schema.edge:
+            edge_schema = model.get(name)
+            if edge_schema is None or not edge_schema.edge:
                 raise ValueError(f"Edge schemata refers to invalid edge schema: {name}")
-            label = stringcase.constcase(schema.edge_label)
+            label = stringcase.constcase(edge_schema.edge_label)
             sconfig["label"] = sconfig.get("label", label)
             inline_properties: list[str] = []
-            for prop in schema.properties.values():
+            for prop in edge_schema.properties.values():
                 if prop.type == registry.entity or prop.hidden:
                     continue
                 inline_properties.append(prop.name)
@@ -170,11 +170,11 @@ class EdgesConfig(BaseModel):
             if prop.type == registry.entity and prop.qname not in properties:
                 properties[prop.qname] = {}
         for name, pconfig in properties.items():
-            prop = model.get_qname(name)
-            if prop is None or prop.type != registry.entity:
+            edge_prop = model.get_qname(name)
+            if edge_prop is None or edge_prop.type != registry.entity:
                 raise ValueError(f"Edge properties refers to invalid property: {name}")
-            pconfig["label"] = pconfig.get("label", stringcase.constcase(prop.name))
-            pconfig["ignore"] = pconfig.get("ignore", prop.hidden)
+            pconfig["label"] = pconfig.get("label", stringcase.constcase(edge_prop.name))
+            pconfig["ignore"] = pconfig.get("ignore", edge_prop.hidden)
         config["properties"] = properties
         return config
 
