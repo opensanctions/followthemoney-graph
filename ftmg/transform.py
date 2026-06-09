@@ -1,17 +1,17 @@
-from collections import defaultdict
-from functools import cache
 import logging
+from collections import defaultdict
+from collections.abc import Generator
+from functools import cache
 from pathlib import Path
-from typing import Generator, LiteralString, NamedTuple, Optional, cast
+from typing import LiteralString, NamedTuple, cast
 
-from normality import squash_spaces
-from rigour.urls import clean_url_compare
-from rigour.ids import StrictFormat
 from followthemoney import Schema
-from followthemoney.types import PropertyType
 from followthemoney.entity import ValueEntity
-from followthemoney.types import registry
+from followthemoney.types import PropertyType, registry
 from neo4j import Driver, Session
+from normality import squash_spaces
+from rigour.ids import StrictFormat
+from rigour.urls import clean_url_compare
 
 from ftmg.config import Configuration
 from ftmg.read import read_entities
@@ -30,7 +30,7 @@ class QueryBatch(NamedTuple):
     params: QueryParams
 
 
-def reified_node_value(prop_type: PropertyType, value: str) -> Optional[str]:
+def reified_node_value(prop_type: PropertyType, value: str) -> str | None:
     """Check if a property value should be reified into a separate node.
 
     Args:
@@ -104,9 +104,10 @@ def generate_node_entity(
     sconfig = config.nodes.schemata.get(proxy.schema.name)
     if sconfig is None or sconfig.ignore:
         return
+    assert proxy.id is not None
 
     # Build properties dict
-    properties: dict[str, str | list[str]] = {
+    properties: QueryParams = {
         "id": proxy.id,
         "caption": proxy.caption,
         "datasets": list(proxy.datasets),
@@ -148,6 +149,7 @@ def generate_reified_values(
     sconfig = config.nodes.schemata.get(proxy.schema.name)
     if sconfig is None or sconfig.ignore:
         return
+    assert proxy.id is not None
     for type_name, tconfig in config.nodes.types.items():
         if not tconfig.reify:
             continue
@@ -171,9 +173,7 @@ def generate_reified_values(
             MERGE (n:{tconfig.label} {{id: props.id}})
             ON CREATE SET n.caption = props.caption
             """
-            yield QueryBatch(
-                query=node_query, params={"id": node_id, "caption": caption}
-            )
+            yield QueryBatch(query=node_query, params={"id": node_id, "caption": caption})
 
             # Yield the edge query
             # Use MERGE to avoid duplicate edges between same entity and value
@@ -321,6 +321,7 @@ def generate_edge_entity(
     if tsconfig is None or tsconfig.ignore:
         return
 
+    assert proxy.id is not None
     sources = proxy.get(source_prop)
     targets = proxy.get(target_prop)
 

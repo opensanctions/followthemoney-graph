@@ -2,8 +2,8 @@ import logging
 from pathlib import Path
 from typing import TextIO
 
-import yaml
 import click
+import yaml
 
 from ftmg.backend import (
     create_indexes,

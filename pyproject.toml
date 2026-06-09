@@ -18,7 +18,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
 ]
-requires-python = ">= 3.10"
+requires-python = ">= 3.12"
 dependencies = [
     "followthemoney >= 4.5.0",
     "neo4j >= 6.0.0",
@@ -31,8 +31,8 @@ dependencies = [
 
 [project.urls]
 Documentation = "https://followthemoney.tech/"
-Repository = "https://github.com/opensanctions/followthemoney.git"
-Issues = "https://github.com/opensanctions/followthemoney/issues"
+Repository = "https://github.com/opensanctions/followthemoney-graph.git"
+Issues = "https://github.com/opensanctions/followthemoney-graph/issues"
 
 [project.optional-dependencies]
 dev = [
@@ -42,6 +42,7 @@ dev = [
     "twine",
     "build",
     "mypy",
+    "ruff",
     "pytest",
     "pytest-cov",
     "types-PyYAML",
@@ -57,11 +58,24 @@ packages = ["ftmg"]
 [tool.hatch.build.targets.sdist]
 only-include = ["ftmg", "LICENSE", "README.md"]
 
-[tool.distutils.bdist_wheel]
-universal = true
-
 [tool.pytest.ini_options]
 asyncio_default_fixture_loop_scope = "function"
 
 [tool.coverage.run]
 branch = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.12"
+
+# These dependencies ship no type stubs; silence the missing-import noise
+# rather than vendoring stubs for third-party packages.
+[[tool.mypy.overrides]]
+module = ["stringcase", "neo4j", "pydantic_settings"]
+ignore_missing_imports = true
