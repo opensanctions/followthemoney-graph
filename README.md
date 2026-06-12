@@ -21,7 +21,7 @@ The `followthemoney-graph` (`ftmg`) tool transforms and loads [FollowTheMoney](h
 ### Install from source
 
 ```bash
-git clone https://github.com/opensanctions/followthemoney.git
+git clone https://github.com/opensanctions/followthemoney-graph.git
 cd followthemoney-graph
 pip install -e .
 ```
